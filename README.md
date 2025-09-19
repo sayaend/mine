@@ -1,1 +1,93 @@
 # mine
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>鉱石掘りゲーム</title>
+</head>
+<body>
+<h1>鉱石掘り</h1>
+
+<!-- 表示部分 -->
+<p id="oreName">石を掘っている</p>
+<p id="oreHP">HP: 10</p>
+<p id="inventory">持ち物: なし</p>
+<p id="money">お金: 0</p>
+<p id="power">掘削力: 1</p>
+
+<!-- 操作ボタン -->
+<button id="dig">掘る！</button>
+<button id="sell">売却</button>
+<button id="upgrade">強化</button>
+
+<script>
+// ----------------- データ -----------------
+const ores = [
+  { name: "石", hp: 10, value: 1 },
+  { name: "銅", hp: 30, value: 5 },
+  { name: "鉄", hp: 60, value: 10 },
+  { name: "金", hp: 150, value: 25 },
+  { name: "ダイヤ", hp: 500, value: 100 }
+];
+
+let currentOre = 0;          // 今の鉱石のインデックス
+let oreHP = ores[0].hp;      // 現在の鉱石の残りHP
+let inventory = {};          // 掘った鉱石
+let money = 0;               // 所持金
+let power = 1;               // 掘削力（クリックごとに与えるダメージ）
+
+// ----------------- 関数 -----------------
+function updateDisplay() {
+  document.getElementById("oreName").textContent = ores[currentOre].name + "を掘っている";
+  document.getElementById("oreHP").textContent = "HP: " + oreHP;
+  document.getElementById("inventory").textContent = "持ち物: " + JSON.stringify(inventory);
+  document.getElementById("money").textContent = "お金: " + money;
+  document.getElementById("power").textContent = "掘削力: " + power;
+}
+
+// 掘る処理
+document.getElementById("dig").onclick = () => {
+  oreHP -= power;
+  if (oreHP <= 0) {
+    // 鉱石ゲット
+    let oreName = ores[currentOre].name;
+    inventory[oreName] = (inventory[oreName] || 0) + 1;
+
+    // 次の鉱石へ
+    if (currentOre < ores.length - 1) {
+      currentOre++;
+    }
+    oreHP = ores[currentOre].hp;
+  }
+  updateDisplay();
+};
+
+// 売却処理
+document.getElementById("sell").onclick = () => {
+  for (let ore of ores) {
+    if (inventory[ore.name]) {
+      money += inventory[ore.name] * ore.value;
+      inventory[ore.name] = 0;
+    }
+  }
+  updateDisplay();
+};
+
+// 強化処理
+document.getElementById("upgrade").onclick = () => {
+  let cost = power * 10;
+  if (money >= cost) {
+    money -= cost;
+    power++;
+    alert("ピッケルを強化した！ 掘削力が " + power + " になった！");
+  } else {
+    alert("お金が足りない！ 強化には " + cost + " 必要");
+  }
+  updateDisplay();
+};
+
+// 初期表示
+updateDisplay();
+</script>
+</body>
+</html>
