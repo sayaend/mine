@@ -2,91 +2,302 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>鉱石掘りゲーム</title>
+<title>ランダム鉱石クリックゲーム 複数鉱石対応版</title>
+<style>
+body { font-family: sans-serif; text-align: center; background: #f0f0f0; }
+h1 { color: #2c3e50; }
+#targetArea { margin: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.hpBarContainer { width: 150px; height: 25px; background: #ccc; border-radius: 10px; margin: 5px auto; overflow: hidden; position: relative; }
+.hpBar { height: 100%; background: linear-gradient(to right, #4caf50, #2ecc71); width: 100%; transition: width 0.3s; }
+button { margin: 3px; padding: 6px 12px; font-size: 14px; border-radius: 5px; border: none; cursor: pointer; }
+button:hover { background-color: #3498db; color: #fff; }
+#money, #message, #sellArea, #gachaArea, #status { font-weight: bold; font-size: 16px; margin: 10px; }
+#itemsContainer { margin: 10px auto; width: fit-content; }
+#itemsArea table { margin: 0 auto; border-collapse: collapse; text-align:center; }
+#itemsArea th, #itemsArea td { padding: 4px 8px; border:1px solid #aaa; text-align:center; vertical-align: middle; }
+#resetBtn { position: fixed; top: 10px; right: 10px; background:red; color:white; }
+</style>
 </head>
 <body>
-<h1>鉱石掘り</h1>
 
-<!-- 表示部分 -->
-<p id="oreName">石を掘っている</p>
-<p id="oreHP">HP: 10</p>
-<p id="inventory">持ち物: なし</p>
+<h1>ランダム鉱石クリックゲーム 複数鉱石対応版</h1>
+
+<div id="targetArea"></div>
+<p id="message"></p>
 <p id="money">お金: 0</p>
-<p id="power">掘削力: 1</p>
+<div id="status">掘削力: 1, クリティカル率: 5%</div>
+<div id="sellArea"></div>
+<div id="gachaArea"></div>
 
-<!-- 操作ボタン -->
-<button id="dig">掘る！</button>
-<button id="sell">売却</button>
-<button id="upgrade">強化</button>
+<div id="itemsContainer">
+  <button id="upgradePower">掘削力強化（必要金額: 10）</button>
+  <button id="upgradeCrit">クリティカル強化（必要金額: 50）</button>
+  <div id="itemsArea"></div>
+</div>
+
+<button id="resetBtn">リセット</button>
+
+<audio id="digSound" src="https://freesound.org/data/previews/341/341695_5260870-lq.mp3"></audio>
+<audio id="finishSound" src="https://freesound.org/data/previews/341/341695_5260870-lq.mp3"></audio>
 
 <script>
 // ----------------- データ -----------------
-const ores = [
-  { name: "石", hp: 10, value: 1 },
-  { name: "銅", hp: 30, value: 5 },
-  { name: "鉄", hp: 60, value: 10 },
-  { name: "金", hp: 150, value: 25 },
-  { name: "ダイヤ", hp: 500, value: 100 }
-];
+const animals=["猫","犬","インコ","マーモット","ウサギ"];
+const oreNames=["石","銅","鉄","銀","金","ルビー","サファイア","エメラルド","ダイヤモンド"];
+let oresData=oreNames.map((name,index)=>({name:name,hp:10*(2**index),value:(index+1)*5}));
 
-let currentOre = 0;          // 今の鉱石のインデックス
-let oreHP = ores[0].hp;      // 現在の鉱石の残りHP
-let inventory = {};          // 掘った鉱石
-let money = 0;               // 所持金
-let power = 1;               // 掘削力（クリックごとに与えるダメージ）
+let targets=[];
+let inventory={};
+let obtainedOres={};
+let keys={};
+let gachaStones={};
+let statues={};
+let money=0;
+let power=1;
+let critRate=0.05;
 
-// ----------------- 関数 -----------------
-function updateDisplay() {
-  document.getElementById("oreName").textContent = ores[currentOre].name + "を掘っている";
-  document.getElementById("oreHP").textContent = "HP: " + oreHP;
-  document.getElementById("inventory").textContent = "持ち物: " + JSON.stringify(inventory);
-  document.getElementById("money").textContent = "お金: " + money;
-  document.getElementById("power").textContent = "掘削力: " + power;
+// 強化費用
+let powerCost=10;
+let critCost=50;
+
+// ----------------- セーブ/ロード -----------------
+function saveData(){
+  const data={inventory,obtainedOres,keys,gachaStones,statues,money,power,critRate,powerCost,critCost,currentHP:{}};
+  targets.forEach(t=>data.currentHP[t.name]=t.currentHP);
+  localStorage.setItem("gameSave",JSON.stringify(data));
+}
+function loadData(){
+  const saved=localStorage.getItem("gameSave");
+  if(saved){
+    const data=JSON.parse(saved);
+    inventory=data.inventory||{};
+    obtainedOres=data.obtainedOres||{};
+    keys=data.keys||{};
+    gachaStones=data.gachaStones||{};
+    statues=data.statues||{};
+    money=data.money||0;
+    power=data.power||1;
+    critRate=data.critRate||0.05;
+    powerCost=data.powerCost||10;
+    critCost=data.critCost||50;
+    return data.currentHP||{};
+  }
+  return {};
 }
 
-// 掘る処理
-document.getElementById("dig").onclick = () => {
-  oreHP -= power;
-  if (oreHP <= 0) {
-    // 鉱石ゲット
-    let oreName = ores[currentOre].name;
-    inventory[oreName] = (inventory[oreName] || 0) + 1;
+// ----------------- 鉱石生成 -----------------
+function getAvailableOres(){
+  return oresData.filter((ore,index)=>{
+    if(index===0) return true;
+    return keys[ore.name];
+  });
+}
 
-    // 次の鉱石へ
-    if (currentOre < ores.length - 1) {
-      currentOre++;
+function createTargets(){
+  const area=document.getElementById("targetArea");
+  area.innerHTML="";
+  const available=getAvailableOres();
+  const currentHPData=loadData();
+
+  available.forEach(ore=>{
+    if(!targets.find(t=>t.name===ore.name)){
+      const t={...ore,currentHP:currentHPData[ore.name]||ore.hp,element:null,digButton:null};
+      targets.push(t);
     }
-    oreHP = ores[currentOre].hp;
-  }
-  updateDisplay();
-};
+  });
 
-// 売却処理
-document.getElementById("sell").onclick = () => {
-  for (let ore of ores) {
-    if (inventory[ore.name]) {
-      money += inventory[ore.name] * ore.value;
-      inventory[ore.name] = 0;
+  targets.forEach(t=>{
+    if(!t.element){
+        const container = document.createElement("div");
+        const name = document.createElement("p");
+        name.textContent = t.name;
+
+        const hpBarContainer = document.createElement("div");
+        hpBarContainer.className="hpBarContainer";
+        const hpBar = document.createElement("div");
+        hpBar.className="hpBar";
+        hpBarContainer.appendChild(hpBar);
+
+        const digBtn = document.createElement("button");
+        digBtn.textContent = "掘る！";
+        digBtn.onclick = () => digTarget(t);
+
+        container.appendChild(name);
+        container.appendChild(hpBarContainer);
+        container.appendChild(digBtn);
+        area.appendChild(container);
+
+        t.element = container;
+        t.hpBar = hpBar;
+    } else {
+        area.appendChild(t.element);
+    }
+  });
+  updateHPBars();
+}
+
+// ----------------- HPバー更新 -----------------
+function updateHPBars(){
+  targets.forEach(t=>{
+    t.hpBar.style.width=Math.max(t.currentHP/t.hp*100,0)+"%";
+  });
+}
+
+// ----------------- 掘る -----------------
+function digTarget(target){
+  let damage=power;
+  if(Math.random()<critRate) damage*=2;
+  target.currentHP-=damage;
+  document.getElementById("digSound").currentTime=0;
+  document.getElementById("digSound").play();
+  
+  updateHPBars();
+  
+  if(target.currentHP<=0){
+    inventory[target.name] = (inventory[target.name] || 0) + 1;
+    obtainedOres[target.name] = (obtainedOres[target.name] || 0) + 1;
+    
+    document.getElementById("finishSound").currentTime=0;
+    document.getElementById("finishSound").play();
+    
+    let idx=oresData.findIndex(o=>o.name===target.name);
+    if(idx<oresData.length-1 && Math.random()<0.1){
+      let next=oresData[idx+1].name;
+      if(!keys[next]){
+        keys[next]=true;
+        document.getElementById("message").textContent=next+"の鍵を入手！";
+        createTargets();
+      }
+    } else document.getElementById("message").textContent="";
+    
+    if(Math.random()<0.05){
+      gachaStones[target.name]=(gachaStones[target.name]||0)+1;
+      document.getElementById("message").textContent+=target.name+"のガチャストーンを入手！";
+      updateGachaArea();
+    }
+    
+    target.currentHP = target.hp;
+    updateHPBars();
+    updateInventory();
+    updateItemsArea();
+    updateStatus();
+    saveData();
+  }
+}
+
+// ----------------- 売却 -----------------
+function updateInventory(){
+  const sellArea=document.getElementById("sellArea");
+  sellArea.innerHTML="";
+  for(let ore in inventory){
+    if(inventory[ore]>0){
+      const btn=document.createElement("button");
+      btn.textContent=ore+"売却 ("+inventory[ore]+")";
+      btn.onclick=(()=>{
+        let o=oresData.find(x=>x.name===ore);
+        money+=inventory[ore]*o.value;
+        inventory[ore]=0;
+        updateInventory();
+        updateItemsArea();
+        updateStatus();
+        saveData();
+      });
+      sellArea.appendChild(btn);
     }
   }
-  updateDisplay();
-};
+  document.getElementById("money").textContent="お金: "+money;
+}
 
-// 強化処理
-document.getElementById("upgrade").onclick = () => {
-  let cost = power * 10;
-  if (money >= cost) {
-    money -= cost;
-    power++;
-    alert("ピッケルを強化した！ 掘削力が " + power + " になった！");
-  } else {
-    alert("お金が足りない！ 強化には " + cost + " 必要");
+// ----------------- ガチャ -----------------
+function updateGachaArea(){
+  const gachaArea=document.getElementById("gachaArea");
+  gachaArea.innerHTML="";
+  for(let ore in gachaStones){
+    if(gachaStones[ore]>0){
+      const btn=document.createElement("button");
+      btn.textContent=ore+"のガチャストーン ("+gachaStones[ore]+")";
+      btn.onclick=(()=>{
+        gachaStones[ore]--;
+        const animal=animals[Math.floor(Math.random()*animals.length)];
+        const statueName=`${ore}の${animal}の像`;
+        statues[statueName]=(statues[statueName]||0)+1;
+        document.getElementById("message").textContent=statueName+"を入手！";
+        updateGachaArea();
+        updateItemsArea();
+        saveData();
+      });
+      gachaArea.appendChild(btn);
+    }
   }
-  updateDisplay();
+}
+
+// ----------------- 所持品欄 -----------------
+function updateItemsArea(){
+  const area=document.getElementById("itemsArea");
+  let html="<h3>所持品</h3><table><tr><th>アイテム</th><th>個数</th></tr>";
+
+  // 1. 鉱石
+  oreNames.forEach(ore=>{
+    if(inventory[ore] && inventory[ore]>0){
+      html+=`<tr><td>${ore}</td><td>${inventory[ore]}</td></tr>`;
+    }
+  });
+
+  // 2. ガチャストーン
+  oreNames.forEach(ore=>{
+    if(gachaStones[ore] && gachaStones[ore]>0){
+      html+=`<tr><td>${ore}のガチャストーン</td><td>${gachaStones[ore]}</td></tr>`;
+    }
+  });
+
+  // 3. 石像（犬、猫、インコ、ウサギ、マーモット）
+  oreNames.forEach(ore=>{
+    let animalsOrder=["犬","猫","インコ","ウサギ","マーモット"];
+    animalsOrder.forEach(animal=>{
+      const statueName=`${ore}の${animal}の像`;
+      if(statues[statueName] && statues[statueName]>0){
+        html+=`<tr><td>${statueName}</td><td>${statues[statueName]}</td></tr>`;
+      }
+    });
+  });
+
+  html+="</table>";
+  area.innerHTML=html;
+}
+
+// ----------------- 強化 -----------------
+function updateStatus(){
+  document.getElementById("status").textContent=`掘削力: ${power}, クリティカル率: ${Math.round(critRate*100)}%`;
+  document.getElementById("upgradePower").textContent=`掘削力強化（必要金額: ${powerCost}）`;
+  document.getElementById("upgradeCrit").textContent=`クリティカル強化（必要金額: ${critCost}）`;
+}
+
+document.getElementById("upgradePower").onclick=()=>{
+  if(money>=powerCost){ money-=powerCost; power++; powerCost*=2; } 
+  else alert("お金が足りない");
+  updateInventory(); updateItemsArea(); updateStatus(); saveData();
+};
+document.getElementById("upgradeCrit").onclick=()=>{
+  if(money>=critCost){ money-=critCost; critRate+=0.05; critCost*=2; } 
+  else alert("お金が足りない");
+  updateInventory(); updateItemsArea(); updateStatus(); saveData();
 };
 
-// 初期表示
-updateDisplay();
+// ----------------- リセット -----------------
+document.getElementById("resetBtn").onclick=()=>{
+  if(confirm("本当にゲームをリセットしますか？")){
+    localStorage.removeItem("gameSave");
+    location.reload();
+  }
+};
+
+// ----------------- 初期化 -----------------
+createTargets();
+updateInventory();
+updateItemsArea();
+updateGachaArea();
+updateStatus();
 </script>
+
 </body>
 </html>
